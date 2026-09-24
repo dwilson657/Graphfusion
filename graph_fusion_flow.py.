@@ -1,0 +1,80 @@
+import numpy as np
+
+def simulate_edge_flow(nodes, edge_index, node_pressure, conductivity=0.1):
+    """
+    Simulates fluid or magnetic flux flow across graph edges based on pressure gradients.
+    Acts like fluid moving through an orange coupling connection.
+    
+    Parameters:
+    - nodes (numpy.ndarray): Array of shape (N, 3) containing [x, y, z] spatial coordinates.
+    - edge_index (numpy.ndarray): Array of shape (2, E) containing [source, target] indices.
+    - node_pressure (numpy.ndarray): Array of shape (N,) representing current pressure/flux values at each node.
+    - conductivity (float): Flow rate constant (how easily fluid moves through the connection).
+    
+    Returns:
+    - numpy.ndarray: Array of shape (N,) containing the updated pressure values for each node.
+    """
+    num_nodes = nodes.shape[0]
+    num_edges = edge_index.shape[1]
+    
+    # Initialize an empty array to accumulate changes in pressure (deltas) for each node
+    pressure_deltas = np.zeros(num_nodes)
+    
+    # Extract source and target indices for all edges simultaneously
+    sources = edge_index[0]
+    targets = edge_index[1]
+    
+    # 1. Calculate the spatial distance (length of pipe/edge) for each connection
+    coord_diffs = nodes[sources] - nodes[targets]
+    distances = np.linalg.norm(coord_diffs, axis=1)
+    
+    # Avoid division by zero on identical node overlaps
+    distances = np.where(distances == 0, 1e-5, distances)
+    
+    # 2. Calculate the pressure gradient across every single "coupling" (edge)
+    # If source pressure > target pressure, flow moves from source to target
+    pressure_gradients = node_pressure[sources] - node_pressure[targets]
+    
+    # 3. Compute flow rate across the edge using Darcy's / Ohm's flow logic
+    # Flow is proportional to gradient and conductivity, inversely proportional to distance
+    edge_flows = (pressure_gradients * conductivity) / distances
+    
+    # 4. Aggregate the flows back into the nodes (Scatter phase)
+    # The source node LOSES fluid/flux, the target node GAINS fluid/flux
+    np.add.at(pressure_deltas, sources, -edge_flows)
+    np.add.at(pressure_deltas, targets, edge_flows)
+    
+    # 5. Apply the delta matrix to update the final systemic pressure state
+    updated_pressure = node_pressure + pressure_deltas
+    
+    # Physical Guardrail: Enforce non-negative pressures in a closed vacuum vessel
+    updated_pressure = np.clip(updated_pressure, 0, None)
+    
+    return updated_pressure
+
+# --- Task-Botting Execution & Verification ---
+if __name__ == "__main__":
+    print("=== Testing GraphFusion Flow Simulation Module ===")
+    
+    # Mock a tiny 3-node linear pipeline system: Node 0 -> Node 1 -> Node 2
+    mock_nodes = np.array([
+        [0.0, 0.0, 0.0],  # Node 0 (Left side of coupling)
+        [1.0, 0.0, 0.0],  # Node 1 (Center coupling junction)
+        [2.0, 0.0, 0.0]   # Node 2 (Right side drop)
+    ])
+    
+    # Bidirectional edge layout representing connected couplings
+    mock_edge_index = np.array([,  # Sources
+        [1, 0, 2, 1]   # Targets
+    ])
+    
+    # Initial pressure states: High pressure spike at Node 0 (like a surge pump turning on)
+    initial_pressure = np.array([100.0, 10.0, 10.0])
+    
+    print(f"Initial Node Pressure State: {initial_pressure}")
+    
+    # Run a single simulation step
+    next_state = simulate_edge_flow(mock_nodes, mock_edge_index, initial_pressure, conductivity=0.2)
+    
+    print(f"Updated Node Pressure State: {np.round(next_state, 2)}")
+    print("==================================================")
